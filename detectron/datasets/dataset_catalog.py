@@ -37,6 +37,24 @@ _RAW_DIR = 'raw_dir'
 
 # Available datasets
 _DATASETS = {
+    'fs_train': {
+        _IM_DIR:
+            _DATA_DIR + '/fs/fs_images',
+        _ANN_FN:
+            _DATA_DIR + '/fs/annotations/fs-train-annotations.json'
+    },
+    'fs_eval': {
+        _IM_DIR:
+            _DATA_DIR + '/fs/fs_images',
+        _ANN_FN:
+            _DATA_DIR + '/fs/annotations/fs-eval-annotations.json'
+    },
+    'fs_val': {
+        _IM_DIR:
+            _DATA_DIR + '/fs/fs_images',
+        _ANN_FN:
+            _DATA_DIR + '/fs/annotations/fs-val-annotations.json'
+    },
     'cityscapes_fine_instanceonly_seg_train': {
         _IM_DIR:
             _DATA_DIR + '/cityscapes/images',

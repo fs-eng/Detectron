@@ -29,7 +29,7 @@ def get_coco_dataset():
     """A dummy COCO dataset that includes only the 'classes' field."""
     ds = AttrDict()
     classes = [
-        '__background__', 'person', 'bicycle', 'car', 'motorcycle', 'airplane',
+        '__background__', 'HW line', 'MP line', 'separator', 'line drawing', 'graphic',
         'bus', 'train', 'truck', 'boat', 'traffic light', 'fire hydrant',
         'stop sign', 'parking meter', 'bench', 'bird', 'cat', 'dog', 'horse',
         'sheep', 'cow', 'elephant', 'bear', 'zebra', 'giraffe', 'backpack',

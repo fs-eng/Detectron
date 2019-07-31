@@ -268,7 +268,7 @@ __C.TEST.RPN_MIN_SIZE = 0
 
 # Maximum number of detections to return per image (100 is based on the limit
 # established for the COCO dataset)
-__C.TEST.DETECTIONS_PER_IM = 100
+__C.TEST.DETECTIONS_PER_IM = 1000
 
 # Minimum score threshold (assuming scores in a [0, 1] range); a value chosen to
 # balance obtaining high recall with not having too many low precision
