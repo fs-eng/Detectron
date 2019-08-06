@@ -17,10 +17,13 @@ build/
 *.swp
 
 # Dataset symlinks
-detectron/datasets/data/fs/fs_images/*
-detectron/datasets/data/fs/fs_test_images/*
-detectron/datasets/data/fs/annotations/*.json
+detectron/datasets/data/*
 !detectron/datasets/data/README.md
+!detectron/datasets/data/fs/README.md
 
 # Generated C files
 detectron/utils/cython_*.c
+
+# models
+models/*
+!models/README.md
