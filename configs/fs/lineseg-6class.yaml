@@ -38,7 +38,7 @@ TRAIN:
   BATCH_SIZE_PER_IM: 512
   RPN_PRE_NMS_TOP_N: 2000  # Per FPN level
 TEST:
-  DATASETS: ('fs_test',)
+  DATASETS: ('fs_eval',)
   WEIGHTS: /home/ubuntu/work/detectron/models/lineseg-6class-800k.pkl
   FORCE_JSON_DATASET_EVAL: True
   SCALE: 800
