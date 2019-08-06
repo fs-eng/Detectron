@@ -20,6 +20,9 @@ build/
 detectron/datasets/data/*
 !detectron/datasets/data/README.md
 !detectron/datasets/data/fs/README.md
+!detectron/datasets/data/fs/test-manifest.txt
+!detectron/datasets/data/fs/train-manifest.txt
+!detectron/datasets/data/fs/val-manifest.txt
 
 # Generated C files
 detectron/utils/cython_*.c
