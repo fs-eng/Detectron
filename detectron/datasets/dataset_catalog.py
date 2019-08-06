@@ -43,11 +43,11 @@ _DATASETS = {
         _ANN_FN:
             _DATA_DIR + '/fs/annotations/fs-train-annotations.json'
     },
-    'fs_eval': {
+    'fs_test': {
         _IM_DIR:
-            _DATA_DIR + '/fs/fs_images',
+            _DATA_DIR + '/fs/fs_test_images',
         _ANN_FN:
-            _DATA_DIR + '/fs/annotations/fs-eval-annotations.json'
+            _DATA_DIR + '/fs/annotations/fs-test-annotations.json'
     },
     'fs_val': {
         _IM_DIR:

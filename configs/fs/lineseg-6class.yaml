@@ -30,20 +30,21 @@ MRCNN:
   DILATION: 1  # default 2
   CONV_INIT: MSRAFill  # default GaussianFill
 TRAIN:
-  WEIGHTS: /home/ubuntu/work/detectron/models/maskrcnn-lineseg-new-400k.pkl #transfer weights from previous run
-  #WEIGHTS: https://dl.fbaipublicfiles.com/detectron/ImageNetPretrained/MSRA/R-101.pkl
+  WEIGHTS: /home/ubuntu/work/detectron/models/lineseg-6class-800k.pkl #transfer weights from previous run
+  #WEIGHTS: https://dl.fbaipublicfiles.com/detectron/ImageNetPretrained/MSRA/R-101.pkl #use when building model from scratch
   DATASETS: ('fs_train', 'fs_val')
   SCALES: (800,)
   MAX_SIZE: 1333
   BATCH_SIZE_PER_IM: 512
   RPN_PRE_NMS_TOP_N: 2000  # Per FPN level
 TEST:
-  DATASETS: ('fs_eval',)
-  WEIGHTS: /home/ubuntu/work/detectron/models/maskrcnn-lineseg-new-400k.pkl
+  DATASETS: ('fs_test',)
+  WEIGHTS: /home/ubuntu/work/detectron/models/lineseg-6class-800k.pkl
   FORCE_JSON_DATASET_EVAL: True
   SCALE: 800
   MAX_SIZE: 1333
   NMS: 0.5
   RPN_PRE_NMS_TOP_N: 1000  # Per FPN level
   RPN_POST_NMS_TOP_N: 1000
+  DETECTIONS_PER_IM: 1000 # override default value of 100
 OUTPUT_DIR: .
