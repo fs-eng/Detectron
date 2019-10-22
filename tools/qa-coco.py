@@ -54,7 +54,7 @@ def main():
                     images.append(img)
 
             total = len(images)
-            #random.shuffle(images)
+            random.shuffle(images)
 
             i = len(labels.items())
             while i < total:
@@ -93,13 +93,15 @@ def main():
                     bpts = [x0, y0, x1, y0, x1, y1, x0, y1]
                     bpts = np.array(bpts, np.int32)
                     bpts = bpts.reshape((-1, 1, 2))
-                    cv2.fillPoly(overlay, [bpts], (0,0,128))
-                    cv2.polylines(output, [bpts], True, (0,0,128), thickness=1, lineType=8, shift=0)'''
+                    #cv2.fillPoly(overlay, [bpts], (0,0,128))
+                    cv2.polylines(output, [bpts], True, (128,0,128), thickness=1, lineType=8, shift=0)'''
 
                     if anno['category_id'] == 1:
                         color = (128, 0, 0)
+                        #color = (random.randint(1, 128), random.randint(1, 128), random.randint(1, 128))
                     elif anno['category_id'] == 2:
                         color = (0, 128, 0)
+                        #color = (random.randint(1, 128), random.randint(1, 128), random.randint(1, 128))
                     elif anno['category_id'] == 3:
                         color = (0, 0, 128)
                     elif anno['category_id'] == 4:

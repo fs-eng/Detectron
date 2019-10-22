@@ -54,6 +54,13 @@ def new_json():
     data['categories'] = categories
     return data
 
+def poly2points(poly):
+    seg = []
+    for (x,y) in list(poly.exterior.coords):
+        seg.append(x)
+        seg.append(y)
+    return seg
+
 def convert_coords(coords, scale_factor):
     points_string = coords.get('points')
     points = points_string.split(' ')
@@ -74,6 +81,7 @@ def convert_coords(coords, scale_factor):
         print('error with coords: {}'.format(points_string))
         return [[]], [], 0.0
 
+    poly = poly.simplify(0.01, preserve_topology=True)
     (xmin, ymin, xmax, ymax) = poly.bounds
     area = float(poly.area)
 
@@ -82,7 +90,7 @@ def convert_coords(coords, scale_factor):
     y0 = float(ymin)
     h = float(ymax-ymin)
 
-    segmentation = [seg]
+    segmentation = [poly2points(poly)]
     bbox = [x0, y0, w, h]
 
     return segmentation, bbox, area
@@ -114,7 +122,6 @@ def main():
 
             page = root.find('a:Page', ns)
 
-            old_format = False
             if page == None:
                 ns = {'a': 'http://schema.primaresearch.org/PAGE/gts/pagecontent/2018-07-15'}
                 page = root.find('a:Page', ns)
@@ -126,7 +133,17 @@ def main():
             if page == None:
                 ns = {'a': 'http://schema.primaresearch.org/PAGE/gts/pagecontent/2013-07-15'}
                 page = root.find('a:Page', ns)
-                old_format = True
+
+            multiline = False
+            for unicode in page.findall('.//a:Unicode', ns):
+                if unicode.text is not None:
+                    if '\n' in unicode.text:
+                        multiline = True
+                        break
+
+            if multiline:
+                print('Multiline line regions... skipping file.')
+                continue
 
             height = int(page.attrib['imageHeight'])
             width = int(page.attrib['imageWidth'])
@@ -183,8 +200,12 @@ def main():
 
             data['images'].append(image)
 
-            if old_format:
-                for tr in page.findall('.//a:TextRegion', ns):
+
+            #old style format using TextRegion to annotate lines, images, etc.
+            for tr in page.findall('.//a:TextRegion', ns):
+                te = tr.find('a:TextEquiv', ns)
+                unicode = tr.find('a:Unicode', ns)
+                if unicode is not None or te is not None:
                     try:
                         tr_type = tr.attrib['type']
                     except KeyError:
@@ -200,8 +221,10 @@ def main():
                         category_id = _category_map['separator']
                     elif tr_type == 'graphic':
                         category_id = _category_map['graphic']
+                    elif tr_type == 'paragraph':
+                        category_id = _category_map['machine-print-line']
                     else:
-                        continue #ignore marginalia, paragraph
+                        continue #ignore marginalia
 
                     coords = tr.find('a:Coords', ns)
                     (segmentation, bbox, area) = convert_coords(coords, scale_factor)
@@ -220,115 +243,114 @@ def main():
                     next_annotation_id += 1
                     data['annotations'].append(annotation)
 
-            else:
-                for tl in page.findall('.//a:TextLine', ns):
-                    try:
-                        production = tl.attrib['production']
-                    except KeyError:
-                        production = 'handwritten-cursive'
+            for tl in page.findall('.//a:TextLine', ns):
+                try:
+                    production = tl.attrib['production']
+                except KeyError:
+                    production = 'handwritten-cursive'
 
-                    if production == 'handwritten-cursive' or production == 'handwritten-printscript' or production == 'medieval-manuscript':
-                        category_id = _category_map['handwritten-line']
-                    elif production == 'printed' or production == 'typewritten':
-                        category_id = _category_map['machine-print-line']
-                    else:
-                        print('production:{}'.format(production))
-                        continue
+                if production == 'handwritten-cursive' or production == 'handwritten-printscript' or production == 'medieval-manuscript':
+                    category_id = _category_map['handwritten-line']
+                elif production == 'printed' or production == 'typewritten':
+                    category_id = _category_map['machine-print-line']
+                else:
+                    print('production:{}'.format(production))
+                    continue
 
-                    coords = tl.find('a:Coords', ns)
-                    (segmentation, bbox, area) = convert_coords(coords, scale_factor)
+                coords = tl.find('a:Coords', ns)
+                (segmentation, bbox, area) = convert_coords(coords, scale_factor)
 
-                    if area == 0.0:
-                        print('bad polygon')
-                        continue #bad polygon TODO: what to do with these?
+                if area == 0.0:
+                    print('bad polygon')
+                    continue #bad polygon TODO: what to do with these?
 
-                    annotation = {
-                        'segmentation': segmentation,
-                        'area': area,
-                        'iscrowd': 0,
-                        'image_id': image_id,
-                        'bbox': bbox,
-                        'category_id': category_id,
-                        'id': next_annotation_id
-                    }
-                    next_annotation_id += 1
-                    data['annotations'].append(annotation)
+                annotation = {
+                    'segmentation': segmentation,
+                    'area': area,
+                    'iscrowd': 0,
+                    'image_id': image_id,
+                    'bbox': bbox,
+                    'category_id': category_id,
+                    'id': next_annotation_id
+                }
+                next_annotation_id += 1
+                data['annotations'].append(annotation)
 
-                for sr in page.findall('.//a:SeparatorRegion', ns):
-                    coords = sr.find('a:Coords', ns)
-                    category_id = _category_map['separator']
-                    (segmentation, bbox, area) = convert_coords(coords, scale_factor)
-                    if area == 0.0:
-                        print('bad polygon')
-                        continue #bad polygon TODO: what to do with these?
-                    annotation = {
-                        'segmentation': segmentation,
-                        'area': area,
-                        'iscrowd': 0,
-                        'image_id': image_id,
-                        'bbox': bbox,
-                        'category_id': category_id,
-                        'id': next_annotation_id
-                    }
-                    next_annotation_id += 1
-                    data['annotations'].append(annotation)
+            for sr in page.findall('.//a:SeparatorRegion', ns):
+                coords = sr.find('a:Coords', ns)
+                category_id = _category_map['separator']
+                (segmentation, bbox, area) = convert_coords(coords, scale_factor)
+                if area == 0.0:
+                    print('bad polygon')
+                    continue #bad polygon TODO: what to do with these?
+                annotation = {
+                    'segmentation': segmentation,
+                    'area': area,
+                    'iscrowd': 0,
+                    'image_id': image_id,
+                    'bbox': bbox,
+                    'category_id': category_id,
+                    'id': next_annotation_id
+                }
+                next_annotation_id += 1
+                data['annotations'].append(annotation)
 
-                for ld in page.findall('.//a:LineDrawingRegion', ns):
-                    coords = ld.find('a:Coords', ns)
-                    category_id = _category_map['line-drawing']
-                    (segmentation, bbox, area) = convert_coords(coords, scale_factor)
-                    if area == 0.0:
-                        print('bad polygon')
-                        continue #bad polygon TODO: what to do with these?
-                    annotation = {
-                        'segmentation': segmentation,
-                        'area': area,
-                        'iscrowd': 0,
-                        'image_id': image_id,
-                        'bbox': bbox,
-                        'category_id': category_id,
-                        'id': next_annotation_id
-                    }
-                    next_annotation_id += 1
-                    data['annotations'].append(annotation)
+            for ld in page.findall('.//a:LineDrawingRegion', ns):
+                coords = ld.find('a:Coords', ns)
+                category_id = _category_map['line-drawing']
+                (segmentation, bbox, area) = convert_coords(coords, scale_factor)
+                if area == 0.0:
+                    print('bad polygon')
+                    continue #bad polygon TODO: what to do with these?
+                annotation = {
+                    'segmentation': segmentation,
+                    'area': area,
+                    'iscrowd': 0,
+                    'image_id': image_id,
+                    'bbox': bbox,
+                    'category_id': category_id,
+                    'id': next_annotation_id
+                }
+                next_annotation_id += 1
+                data['annotations'].append(annotation)
 
-                for gr in page.findall('.//a:GraphicRegion', ns):
-                    coords = gr.find('a:Coords', ns)
-                    category_id = _category_map['graphic']
-                    (segmentation, bbox, area) = convert_coords(coords, scale_factor)
-                    if area == 0.0:
-                        print('bad polygon')
-                        continue #bad polygon
-                    annotation = {
-                        'segmentation': segmentation,
-                        'area': area,
-                        'iscrowd': 0,
-                        'image_id': image_id,
-                        'bbox': bbox,
-                        'category_id': category_id,
-                        'id': next_annotation_id
-                    }
-                    next_annotation_id += 1
-                    data['annotations'].append(annotation)
+            for gr in page.findall('.//a:GraphicRegion', ns):
+                coords = gr.find('a:Coords', ns)
+                category_id = _category_map['graphic']
+                (segmentation, bbox, area) = convert_coords(coords, scale_factor)
+                if area == 0.0:
+                    print('bad polygon')
+                    continue #bad polygon
+                annotation = {
+                    'segmentation': segmentation,
+                    'area': area,
+                    'iscrowd': 0,
+                    'image_id': image_id,
+                    'bbox': bbox,
+                    'category_id': category_id,
+                    'id': next_annotation_id
+                }
+                next_annotation_id += 1
+                data['annotations'].append(annotation)
 
-                for ir in page.findall('.//a:ImageRegion', ns):
-                    coords = ir.find('a:Coords', ns)
-                    category_id = _category_map['graphic']
-                    (segmentation, bbox, area) = convert_coords(coords, scale_factor)
-                    if area == 0.0:
-                        print('bad polygon')
-                        continue #bad polygon TODO: what to do with these?
-                    annotation = {
-                        'segmentation': segmentation,
-                        'area': area,
-                        'iscrowd': 0,
-                        'image_id': image_id,
-                        'bbox': bbox,
-                        'category_id': category_id,
-                        'id': next_annotation_id
-                    }
-                    next_annotation_id += 1
-                    data['annotations'].append(annotation)
+            for ir in page.findall('.//a:ImageRegion', ns):
+                coords = ir.find('a:Coords', ns)
+                category_id = _category_map['graphic']
+                (segmentation, bbox, area) = convert_coords(coords, scale_factor)
+                if area == 0.0:
+                    print('bad polygon')
+                    continue #bad polygon TODO: what to do with these?
+                annotation = {
+                    'segmentation': segmentation,
+                    'area': area,
+                    'iscrowd': 0,
+                    'image_id': image_id,
+                    'bbox': bbox,
+                    'category_id': category_id,
+                    'id': next_annotation_id
+                }
+                next_annotation_id += 1
+                data['annotations'].append(annotation)
 
                 #TODO: handle TableRegion?
 
