@@ -14,7 +14,8 @@ import os
 import sys
 import time
 import numpy as np
-
+import json
+import re
 from datetime import datetime
 import xml.etree.ElementTree as etree
 from xml.etree.ElementTree import Element, SubElement, Comment, tostring
@@ -24,9 +25,6 @@ from shapely.geometry import Polygon
 from shapely.geometry import LineString
 from shapely.ops import nearest_points
 from shapely.ops import unary_union
-from shapely import speedups
-from rtree import index
-
 
 from caffe2.python import workspace
 
@@ -88,6 +86,13 @@ def parse_args():
         type=str
     )
     parser.add_argument(
+        '--output-type',
+        dest='output_type',
+        help='Output type (page-xml or coco-json.  default: page-xml)',
+        default='page-xml',
+        type=str
+    )
+    parser.add_argument(
         'im_or_folder', help='image or folder of images', default=None
     )
 
@@ -128,21 +133,6 @@ def prettify(elem):
     return reparsed.toprettyxml(indent='    ')
 
 
-def calculate_aspect_ratio(poly):
-    (minx, miny, maxx, maxy) = poly.bounds
-    aspect_ratio = (maxx - minx) / (maxy - miny)
-    return aspect_ratio
-
-
-def determine_orientation(aspect_ratio):
-    line_orientation = 'undetermined'
-    if aspect_ratio > 2.0:
-        line_orientation = 'horizontal'
-    elif aspect_ratio < 0.5:
-        line_orientation = 'vertical'
-    return line_orientation
-
-
 def new_xml():
     root = Element('top')
     root.tag = 'PcGts'
@@ -159,6 +149,44 @@ def new_xml():
     last_change.text = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
 
     return root
+
+
+def new_json():
+    data = {}
+
+    info = {
+        'description': 'FamilySearch Line Segmentation',
+        'url': 'http://www.familysearch.org',
+        'year': int(datetime.now().strftime('%Y')),
+        'contributor': 'FamilySearch International',
+        'date_created': datetime.now().strftime('%Y/%m/%d')
+    }
+
+    data['info'] = info
+
+    licenses = [
+        {
+            'url': 'http://www.familysearch.org',
+            'id': 1,
+            'name': 'Proprietary Data. All Rights Reserved, FamilySearch International, 2019'
+        }
+    ]
+
+    data['licenses'] = licenses
+    data['images'] = []
+    data['annotations'] = []
+
+    categories = []
+    for (k, v) in _category_map.items():
+        category = {
+            'supercategory': 'line',
+            'id': v,
+            'name': k
+        }
+        categories.append(category)
+
+    data['categories'] = categories
+    return data
 
 
 def convert_from_cls_format(cls_boxes, cls_segms, cls_keyps):
@@ -197,13 +225,15 @@ def make_bboxes(boxes):
         bboxes.append(([x0, y0, w, h], score))
     return bboxes
 
-
 def convert_to_xml_coords(segmentation):
     if len(segmentation) == 0:
         return ''
-    new_segmentation = segmentation[0]
+    new_segmentation = fuse_segmentation(segmentation)
+    # new_segmentation = segmentation[0]
     coord_string = ''
+
     i = 0
+
     while i < len(new_segmentation):
         x = new_segmentation[i]
         y = new_segmentation[i + 1]
@@ -262,7 +292,8 @@ def fuse_segmentation(segmentation):
             bridge = LineString([pt1, pt2]).buffer(4.0)
             geoms = [new_poly, poly, bridge]
             new_poly = unary_union(geoms)
-            logging.debug('Combined area should be at least {}.  It is {}'.format(area_before + poly.area, new_poly.area))
+            logging.debug(
+                'Combined area should be at least {}.  It is {}'.format(area_before + poly.area, new_poly.area))
 
         s_pts = list(new_poly.exterior.coords)
         points = []
@@ -282,55 +313,6 @@ def calc_area(segmentation):
     return area
 
 
-def identify_bad(scores, category_ids, polygons, spatial_index, avg_line_orientation):
-    bad = {}
-    for (i, poly) in enumerate(polygons):
-        try:
-            bad[i] #skip if already ID'ed as bad
-        except KeyError:
-            ar = calculate_aspect_ratio(poly)
-            line_orientation = determine_orientation(ar)
-            category_id = category_ids[i]
-            score = scores[i]
-            overlappers = list(spatial_index.intersection(poly.bounds))
-            overlappers.remove(i)
-
-            if avg_line_orientation != 'undetermined' and (category_id == 1 or category_id == 2) and line_orientation != 'undetermined' and score < 0.5:
-                if line_orientation != avg_line_orientation:
-                    good_overlapper_count = 0
-                    for ol in overlappers:
-                        if category_ids[ol] == 1 or category_ids[ol] == 2:
-                            if determine_orientation(calculate_aspect_ratio(polygons[ol])) == avg_line_orientation:
-                                good_overlapper_count += 1
-                    if good_overlapper_count >= 3:  #cuts across 3 or more good lines
-                        bad[i] = True
-                        continue
-
-            for ol in overlappers:
-                a = poly
-                b = polygons[ol]
-                a_idx = i
-                b_idx = ol
-                iarea = a.intersection(b).area
-                iou = iarea / a.union(b).area
-                if iou > 0.5:
-                    #eliminate the region with a lower IoU score
-                    if scores[b_idx] < scores[a_idx]:
-                        bad[b_idx] = True
-                    else:
-                        bad[a_idx] = True
-                else:
-                    if iarea / b.area > 0.7: #b contained within a, eliminate b
-                        bad[b_idx] = True
-                    elif iarea / a.area > 0.7: #a contained within b, eliminate a
-                        bad[a_idx] = True
-                    else:
-                        pass #both a and b survive for now
-                    pass
-
-    return bad
-
-
 def main(args):
     logger = logging.getLogger(__name__)
 
@@ -344,11 +326,6 @@ def main(args):
     assert not cfg.TEST.PRECOMPUTED_PROPOSALS, \
         'Models that require precomputed proposals are not supported'
 
-    if speedups.available:
-        speedups.enable()
-    else:
-        logging.info('No shapely speedups! :(')
-
     model = infer_engine.initialize_model_from_cfg(args.weights)
 
     if os.path.isdir(args.im_or_folder):
@@ -361,11 +338,12 @@ def main(args):
 
     for i, im_name in enumerate(im_list):
 
-        t0 = time.time()
-
         image_file_name = os.path.basename(im_name)
 
-        ext = 'xml'
+        if args.output_type == 'coco-json':
+            ext = 'json'
+        else:
+            ext = 'xml'
 
         out_name = os.path.join(
             args.output_dir, '{}'.format(os.path.splitext(image_file_name)[0] + '.' + ext)
@@ -384,13 +362,11 @@ def main(args):
         if scale_factor != 1.0:
             im = cv2.resize(im, (int(round(float(im_w) * scale_factor)), int(round(float(im_h) * scale_factor))))
 
-        logger.info('Image prep time: {:.3f}s'.format(time.time() - t0))
-
         timers = defaultdict(Timer)
-        t1 = time.time()
+        t = time.time()
         with c2_utils.NamedCudaScope(0):
             cls_boxes, cls_segms, cls_keyps = infer_engine.im_detect_all(model, im, None, timers=timers)
-        logger.info('Inference time: {:.3f}s'.format(time.time() - t1))
+        logger.info('Inference time: {:.3f}s'.format(time.time() - t))
         for k, v in timers.items():
             logger.info(' | {}: {:.3f}s'.format(k, v.average_time))
         if i == 0:
@@ -399,23 +375,46 @@ def main(args):
                 'rest (caches and auto-tuning need to warm up)'
             )
 
-        t2 = time.time()
         if isinstance(cls_boxes, list):
 
             (boxes, segms, keyps, classes) = convert_from_cls_format(cls_boxes, cls_segms, cls_keyps)
 
-            bboxes = make_bboxes(boxes)
-            logger.debug('{} lines found'.format(len(bboxes)))
+            m = re.match('([0-9]{9})_([0-9]{5})', image_file_name)
+            dgs_str = m.group(1)
+            img_num_str = m.group(2)
 
-            data = new_xml()
-            page = SubElement(data, 'Page')
-            page.set('imageFilename', image_file_name)
-            page.set('imageWidth', str(im_w))
-            page.set('imageHeight', str(im_h))
-            tr = SubElement(page, 'TextRegion')
-            tr.set('id', 'region0')
-            coords = SubElement(tr, 'Coords')
-            coords.set('points', '0,0 {},0 {},{} 0,{}'.format(im_w, im_w, im_h, im_h))
+            image_url = 'https://das.familysearch.org/das/v2/dgs:' + dgs_str + '.' + dgs_str + '_' + img_num_str + '/$dist'
+
+            bboxes = make_bboxes(boxes)
+            logger.info('{} lines found'.format(len(bboxes)))
+
+            if args.output_type == 'coco-json':
+                data = new_json()
+
+                image = {
+                    'license': 1,
+                    'file_name': image_file_name,
+                    'coco_url': image_url,
+                    'height': im_h,
+                    'width': im_w,
+                    'date_captured': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                    'flickr_url': image_url,
+                    'id': 1
+                }
+
+                data['images'].append(image)
+            else:
+                data = new_xml()
+                page = SubElement(data, 'Page')
+                page.set('imageFilename', image_file_name)
+                page.set('imageWidth', str(im_w))
+                page.set('imageHeight', str(im_h))
+                tr = SubElement(page, 'TextRegion')
+                tr.set('id', 'region0')
+                coords = SubElement(tr, 'Coords')
+                coords.set('points', '0,0 {},0 {},{} 0,{}'.format(im_w, im_w, im_h, im_h))
+
+            next_annotation_id = 1
 
             next_line_id = 1
             next_sep_id = 1
@@ -423,96 +422,75 @@ def main(args):
             next_gra_id = 1
 
             j = 0
-            k = 0
             if segms is not None:
-                aspect_ratios = []
-                polygons = []
-                spatial_index = index.Index()
-                segmentations = []
-                scores = []
-                bboxen = []
-                category_ids = []
-
                 for segm in segms:
-                    score = boxes[j, -1]
-                    logging.debug('score: {}'.format(score))
-                    if score >= args.thresh:
-                        mask = mask_util.decode(segm)
-                        segmentation = []
-                        contours = measure.find_contours(mask, 0.5)
+                    mask = mask_util.decode(segm)
+                    contours = measure.find_contours(mask, 0.5)
+                    segmentation = []
+                    (bbox, score1) = bboxes[j]
+                    score2 = boxes[j, -1]
+                    logging.debug('score1: {} score2: {}'.format(score1, score2))
+
+                    if score2 >= args.thresh:
+                        bbox = [x / scale_factor for x in bbox]
+
                         for contour in contours:
                             contour = np.flip(contour, axis=1)
                             seg = contour.ravel().tolist()
                             seg = [x / scale_factor for x in seg]
                             segmentation.append(seg)
-                        if len(segmentation) > 0:
-                            segmentation = [fuse_segmentation(segmentation)]
-                            segmentations.append(segmentation)
-                            poly = points2poly(segmentation[0])
-                            polygons.append(poly)
-                            spatial_index.insert(k, poly.bounds)
-                            bbox = bboxes[j][0]
-                            bboxen.append(bbox)
-                            scores.append(score)
-                            category_id = classes[j]
-                            if category_id == 1 or category_id == 2:
-                                aspect_ratio = calculate_aspect_ratio(poly)
-                                aspect_ratios.append(aspect_ratio)
-                            category_ids.append(category_id)
-                            k += 1
+                        if args.output_type == 'coco-json':
+                            area = calc_area(segmentation)
+                            annotation = {
+                                'segmentation': segmentation,
+                                'score': float(score2),
+                                'area': area,
+                                'iscrowd': 0,
+                                'image_id': 1,
+                                'bbox': bbox,
+                                'category_id': classes[j],
+                                'id': next_annotation_id
+                            }
+                            data['annotations'].append(annotation)
+                            next_annotation_id += 1
+                        else:
+                            if _r_category_map[classes[j]] == 'handwritten-cursive' or _r_category_map[classes[j]] == 'printed':
+                                elem = SubElement(tr, 'TextLine')
+                                elem.set('production', _r_category_map[classes[j]], )
+                                elem.set('id', 'tl' + str(next_line_id))
+                                next_line_id += 1
+                            elif _r_category_map[classes[j]] == 'separator':
+                                elem = SubElement(page, 'SeparatorRegion')
+                                elem.set('id', 'sr' + str(next_sep_id))
+                                next_sep_id += 1
+                            elif _r_category_map[classes[j]] == 'line-drawing':
+                                elem = SubElement(page, 'LineDrawingRegion')
+                                elem.set('id', 'ldr' + str(next_ld_id))
+                                next_ld_id += 1
+                            else:  # graphic
+                                elem = SubElement(page, 'GraphicRegion')
+                                elem.set('id', 'gr' + str(next_gra_id))
+                                next_gra_id += 1
+
+                            coord_string = convert_to_xml_coords(segmentation)
+                            coords = SubElement(elem, 'Coords')
+                            coords.set('points', coord_string)
 
                     else:
                         logging.info('Not keeping line with confidence {} below threshold of {}'.format(score2, args.thresh))
 
                     j += 1
 
-                try:
-                    avg_aspect_ratio = sum(aspect_ratios) / float(len(aspect_ratios))
-                except ZeroDivisionError:
-                    avg_aspect_ratio = 1
-                avg_line_orientation = determine_orientation(avg_aspect_ratio)
-
-                bad = identify_bad(scores, category_ids, polygons, spatial_index, avg_line_orientation)
-
-                for (l, bbox) in enumerate(bboxen):
-                    try:
-                        bad[l]
-                    except KeyError:
-                        category_id = category_ids[l]
-                        score = scores[l]
-                        poly = polygons[l]
-                        segmentation = segmentations[l]
-
-                        if _r_category_map[category_id] == 'handwritten-cursive' or _r_category_map[category_id] == 'printed':
-                            elem = SubElement(tr, 'TextLine')
-                            elem.set('production', _r_category_map[category_id])
-                            elem.set('id', 'tl' + str(next_line_id))
-                            next_line_id += 1
-                        elif _r_category_map[category_id] == 'separator':
-                            elem = SubElement(page, 'SeparatorRegion')
-                            elem.set('id', 'sr' + str(next_sep_id))
-                            next_sep_id += 1
-                        elif _r_category_map[category_id] == 'line-drawing':
-                            elem = SubElement(page, 'LineDrawingRegion')
-                            elem.set('id', 'ldr' + str(next_ld_id))
-                            next_ld_id += 1
-                        else:  # graphic
-                            elem = SubElement(page, 'GraphicRegion')
-                            elem.set('id', 'gr' + str(next_gra_id))
-                            next_gra_id += 1
-
-                        coord_string = convert_to_xml_coords(segmentation)
-                        coords = SubElement(elem, 'Coords')
-                        coords.set('points', coord_string)
 
             with open(out_name, 'w') as outfile:
-                outfile.write(prettify(data))
+                if args.output_type == 'coco-json':
+                    #pdb.set_trace()
+                    json.dump(data, outfile, indent=4)
+                else:
+                    outfile.write(prettify(data))
 
         else:
             logger.info('Nothing found in image {}'.format(image_file_name))
-
-        logger.info('Cleanup and serialization time: {:.3f}s'.format(time.time() - t2))
-        logger.info('Total time: {:.3f}s\n'.format(time.time() - t0))
 
 
 if __name__ == '__main__':
