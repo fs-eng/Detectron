@@ -446,7 +446,11 @@ def main(args):
                             seg = [x / scale_factor for x in seg]
                             segmentation.append(seg)
                         if len(segmentation) > 0:
-                            segmentation = [fuse_segmentation(segmentation)]
+                            try:
+                                segmentation = [fuse_segmentation(segmentation)]
+                            except ValueError:
+                                logging.debug('bad segment {}, skipping'.format(segmentation))
+                                continue
                             segmentations.append(segmentation)
                             poly = points2poly(segmentation[0])
                             polygons.append(poly)
