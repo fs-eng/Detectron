@@ -59,13 +59,13 @@ _DATASETS = {
         _IM_DIR:
             _DATA_DIR + '/fs_articles/images',
         _ANN_FN:
-            _DATA_DIR + 'fs_articles/annotations/annotations-train.json'
+            _DATA_DIR + '/fs_articles/annotations/annotations-train.json'
     },
     'fs_article_val': {
         _IM_DIR:
             _DATA_DIR + '/fs_articles/images',
         _ANN_FN:
-            _DATA_DIR + 'fs_articles/annotations/annotations-val.json'
+            _DATA_DIR + '/fs_articles/annotations/annotations-val.json'
     },
     'cityscapes_fine_instanceonly_seg_train': {
         _IM_DIR:
