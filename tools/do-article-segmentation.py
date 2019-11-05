@@ -291,7 +291,7 @@ def main(args):
 
                         annotation = {
                             'score': float(score2),
-                            'segmentation': bbox2segmentation(bbox),
+                            'segmentation': [bbox2segmentation(bbox)],
                             'area': bbox_area(bbox),
                             'iscrowd': 0,
                             'image_id': next_img_id,
